@@ -120,6 +120,10 @@ exec(char *path, char **argv)
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
     
+  // ass1 2024
+  p->affinity_mask = 0;
+  p->effective_affinity_mask = p->affinity_mask;
+
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;

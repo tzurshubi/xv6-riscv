@@ -58,6 +58,10 @@ procinit(void)
       initlock(&p->lock, "proc");
       p->state = UNUSED;
       p->kstack = KSTACK((int) (p - proc));
+
+      // ass1 2024 
+      p->affinity_mask = 0;
+      p->effective_affinity_mask = p->affinity_mask;
   }
 }
 
@@ -149,6 +153,10 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  // ass1 2024 
+  p->affinity_mask = 0;
+  p->effective_affinity_mask = p->affinity_mask;
+
   return p;
 }
 
@@ -172,6 +180,10 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  // ass1 2024 
+  p->affinity_mask = 0;
+  p->effective_affinity_mask = p->affinity_mask;  
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -370,6 +382,11 @@ fork(void)
   np->stime = p->stime;
   np->retime = p->retime;
 
+  // ass1 2024
+  np->affinity_mask = p->affinity_mask;
+  np->effective_affinity_mask = p->effective_affinity_mask;
+
+
   np->state = RUNNABLE;
   release(&np->lock);
 
@@ -506,29 +523,37 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  int vruntime;
+  int cpu_id; // ass1 2024
 
+  
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
-    
-    long long lowestAccumulator = getLowestAccumulator();
-    int lowestVruntime = getLowestVruntime();
 
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
-      if(p->state == RUNNABLE){
-        vruntime = (p->cfs_priority * p->rtime) / (p->rtime + p->stime + p->retime);
-        if(sched_policy == 0 || 
-              (sched_policy == 1 && p->accumulator == lowestAccumulator) ||
-              (sched_policy == 2 && vruntime == lowestVruntime)){
+      if(p->state == RUNNABLE) {
+        // ass1 2024 - Fetch the current CPU ID
+        cpu_id = cpuid();
+        if(p->effective_affinity_mask == 0 || (p->effective_affinity_mask & (1 << cpu_id))){
           // Switch to chosen process.  It is the process's job
           // to release its lock and then reacquire it
           // before jumping back to us.
+          printf("Process %d running on CPU %d\n", p->pid, cpu_id);
+
           p->state = RUNNING;
           c->proc = p;
           swtch(&c->context, &p->context);
+
+          // ass1 2024 - update the effective_affinity_mask when the process yields the CPU
+          // printf("Process %d done running on CPU %d\n", p->pid, cpu_id);
+          if (p->affinity_mask != 0) {  // Check if affinity mask is not zero (meaning specific CPUs are set)
+            p->effective_affinity_mask &= ~(1 << cpu_id); // Remove the current CPU from effective mask
+            if (p->effective_affinity_mask == 0) { // Reset if no bits are set
+              p->effective_affinity_mask = p->affinity_mask;
+            }
+          }
 
           // Process is done running for now.
           // It should have changed its p->state before coming back.
@@ -539,6 +564,7 @@ scheduler(void)
     }
   }
 }
+
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
 // intena because intena is a property of this

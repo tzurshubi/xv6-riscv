@@ -106,6 +106,7 @@ extern uint64 sys_set_ps_priority(void); // os as1 task5
 extern uint64 sys_set_cfs_priority(void); // os as1 task6
 extern uint64 sys_get_cfs_stats(void); // os as1 task6
 extern uint64 sys_set_policy(void); // os as1 task7
+extern uint64 sys_set_affinity_mask(void); // ass1 2024 
 
 
 // An array mapping syscall numbers from syscall.h
@@ -137,6 +138,7 @@ static uint64 (*syscalls[])(void) = {
 [SYS_set_cfs_priority]  sys_set_cfs_priority,
 [SYS_get_cfs_stats]  sys_get_cfs_stats,
 [SYS_set_policy]    sys_set_policy,
+[SYS_set_affinity_mask]    sys_set_affinity_mask,
 };
 
 void

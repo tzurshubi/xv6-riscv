@@ -113,4 +113,7 @@ struct proc {
   int rtime;                   //run time
   int stime;                   //sleep time
   int retime;                  //runnable time
+
+  int affinity_mask;           // ass1 2024
+  int effective_affinity_mask; // ass1 2024
 };

@@ -139,9 +139,18 @@ sys_get_cfs_stats(void)
 uint64
 sys_set_policy(void)
 {
-  // from here we can call other function in the kernel from proc.c or trap.c and many others places
   int policy;
   argint(0, &policy);
   set_policy(policy);
+  return 0;
+}
+
+// ass1 2024
+uint64
+sys_set_affinity_mask(void)
+{
+  int mask;
+  argint(0, &mask);
+  myproc()->affinity_mask = mask;
   return 0;
 }
