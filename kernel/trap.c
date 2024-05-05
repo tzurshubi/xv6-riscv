@@ -54,7 +54,7 @@ usertrap(void)
     // system call
 
     if(killed(p))
-      exit(-1);
+      exit(-1,0);
 
     // sepc points to the ecall instruction,
     // but we want to return to the next instruction.
@@ -74,11 +74,16 @@ usertrap(void)
   }
 
   if(killed(p))
-    exit(-1);
+    exit(-1,"check");
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
+    if(myproc() != 0 && myproc()->state == RUNNING){
+      struct proc *p = myproc();
+      p->accumulator += p->ps_priority;
+    }
     yield();
+  }
 
   usertrapret();
 }
@@ -151,8 +156,12 @@ kerneltrap()
   }
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
+  if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING){
+    struct proc *p = myproc();
+    p->accumulator += p->ps_priority;
     yield();
+  }
+    
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.
@@ -165,6 +174,7 @@ clockintr()
 {
   acquire(&tickslock);
   ticks++;
+  updateProcessesTime();
   wakeup(&ticks);
   release(&tickslock);
 }

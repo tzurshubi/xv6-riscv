@@ -8,3 +8,7 @@ typedef unsigned int  uint32;
 typedef unsigned long uint64;
 
 typedef uint64 pde_t;
+
+// tzur defined exit_msg length
+#define EXIT_MSG_LEN 32 
+

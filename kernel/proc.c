@@ -5,6 +5,9 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "limits.h"
+
+int sched_policy = 0; // os as1 task7
 
 struct cpu cpus[NCPU];
 
@@ -251,6 +254,16 @@ userinit(void)
 
   p->state = RUNNABLE;
 
+  //task5
+  p->ps_priority = 5;
+  p->accumulator = 0;
+
+  //task6
+  p->cfs_priority = 100;
+  p->rtime = 0;
+  p->stime = 0;
+  p->retime = 0;
+
   release(&p->lock);
 }
 
@@ -272,6 +285,35 @@ growproc(int n)
   }
   p->sz = sz;
   return 0;
+}
+
+
+long long getLowestAccumulator(){
+  long long minAccumulator = LLONG_MAX;
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++) {
+    if(p->state == RUNNABLE || p->state == RUNNING) {
+      if(p->accumulator < minAccumulator || minAccumulator == LLONG_MAX) {
+        minAccumulator = p->accumulator;
+      }
+    }
+  }
+  return minAccumulator;
+}
+
+int getLowestVruntime(){
+  int LowestVruntime = INT_MAX;
+  int vruntime;
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++) {
+    if(p->state == RUNNABLE || p->state == RUNNING) {
+      vruntime = (p->cfs_priority * p->rtime) / (p->rtime + p->stime + p->retime);
+      if(vruntime < LowestVruntime) {
+        LowestVruntime = vruntime;
+      }
+    }
+  }
+  return LowestVruntime;
 }
 
 // Create a new process, copying the parent.
@@ -319,6 +361,15 @@ fork(void)
   release(&wait_lock);
 
   acquire(&np->lock);
+  //task5
+  np->ps_priority = 5;
+  np->accumulator = getLowestAccumulator();
+  //task6
+  np->cfs_priority = p->cfs_priority;
+  np->rtime = p->rtime;
+  np->stime = p->stime;
+  np->retime = p->retime;
+
   np->state = RUNNABLE;
   release(&np->lock);
 
@@ -344,8 +395,9 @@ reparent(struct proc *p)
 // An exited process remains in the zombie state
 // until its parent calls wait().
 void
-exit(int status)
+exit(int status, char* exit_msg)
 {
+  //printf("entered exit() in proc.c\n");
   struct proc *p = myproc();
 
   if(p == initproc)
@@ -377,25 +429,29 @@ exit(int status)
 
   p->xstate = status;
   p->state = ZOMBIE;
+  // tzur copy the exit message to the pcb
+  for(int i=0; i < EXIT_MSG_LEN; i++){
+    p->exit_msg[i] = exit_msg[i];
+  }
 
   release(&wait_lock);
 
   // Jump into the scheduler, never to return.
   sched();
   panic("zombie exit");
+  printf("finished exit() in proc.c");
 }
 
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
 int
-wait(uint64 addr)
+wait(uint64 addr, uint64 exit_msg_addr)
 {
   struct proc *pp;
   int havekids, pid;
   struct proc *p = myproc();
 
   acquire(&wait_lock);
-
   for(;;){
     // Scan through table looking for exited children.
     havekids = 0;
@@ -408,8 +464,12 @@ wait(uint64 addr)
         if(pp->state == ZOMBIE){
           // Found one.
           pid = pp->pid;
+
+          // tzur copy the exit message from kernel space to user space
+          copyout(p->pagetable, exit_msg_addr, pp->exit_msg,32); 
+
           if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
-                                  sizeof(pp->xstate)) < 0) {
+              sizeof(pp->xstate)) < 0) {
             release(&pp->lock);
             release(&wait_lock);
             return -1;
@@ -446,31 +506,39 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  
+  int vruntime;
+
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
+    
+    long long lowestAccumulator = getLowestAccumulator();
+    int lowestVruntime = getLowestVruntime();
 
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+      if(p->state == RUNNABLE){
+        vruntime = (p->cfs_priority * p->rtime) / (p->rtime + p->stime + p->retime);
+        if(sched_policy == 0 || 
+              (sched_policy == 1 && p->accumulator == lowestAccumulator) ||
+              (sched_policy == 2 && vruntime == lowestVruntime)){
+          // Switch to chosen process.  It is the process's job
+          // to release its lock and then reacquire it
+          // before jumping back to us.
+          p->state = RUNNING;
+          c->proc = p;
+          swtch(&c->context, &p->context);
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
+          // Process is done running for now.
+          // It should have changed its p->state before coming back.
+          c->proc = 0;
+        }
       }
       release(&p->lock);
     }
   }
 }
-
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
 // intena because intena is a property of this
@@ -572,6 +640,7 @@ wakeup(void *chan)
     if(p != myproc()){
       acquire(&p->lock);
       if(p->state == SLEEPING && p->chan == chan) {
+        p->accumulator = getLowestAccumulator();
         p->state = RUNNABLE;
       }
       release(&p->lock);
@@ -593,6 +662,7 @@ kill(int pid)
       p->killed = 1;
       if(p->state == SLEEPING){
         // Wake process from sleep().
+        p->accumulator = getLowestAccumulator();
         p->state = RUNNABLE;
       }
       release(&p->lock);
@@ -679,5 +749,49 @@ procdump(void)
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
+  }
+}
+
+void set_ps_priority(int priority) {
+  struct proc *p = myproc();
+  p->ps_priority = priority;
+}
+
+void set_cfs_priority(int priority) {
+  struct proc *p = myproc();
+  p->cfs_priority = 75 + (priority*25);
+}
+
+void set_policy(int policy){
+  sched_policy = policy;
+}
+
+void get_cfs_stats(int procId, uint64 addr){
+  struct proc *p;
+  struct proc *currProc = myproc();
+  int stats[4];
+  for(p = proc; p < &proc[NPROC]; p++) {
+    if(p->pid == procId){
+      stats[0] = p->cfs_priority;
+      stats[1] = p->rtime;
+      stats[2] = p->stime;
+      stats[3] = p->retime;
+      copyout(currProc->pagetable, addr, (char *)&stats,sizeof(stats));
+    }
+  }
+}
+
+void updateProcessesTime(){
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++) {
+    if(p->state == RUNNING){
+      p->rtime = p->rtime+1;
+    }
+    else if(p->state == SLEEPING){
+      p->stime = p->stime+1;
+    }
+    else if(p->state == RUNNABLE){
+      p->retime = p->retime+1;
+    }
   }
 }

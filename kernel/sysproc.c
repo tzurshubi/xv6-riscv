@@ -10,8 +10,10 @@ uint64
 sys_exit(void)
 {
   int n;
+  char exit_msg[32];
   argint(0, &n);
-  exit(n);
+  argstr(1, exit_msg, EXIT_MSG_LEN); // tzur copy a second argument from user space to kernel space
+  exit(n, exit_msg); // tzur
   return 0;  // not reached
 }
 
@@ -30,9 +32,12 @@ sys_fork(void)
 uint64
 sys_wait(void)
 {
-  uint64 p;
+  // tzur prev func: uint64 p; argaddr(0, &p); return wait(p);
+  // modified func:
+  uint64 p, exit_message_addr;
   argaddr(0, &p);
-  return wait(p);
+  argaddr(1, &exit_message_addr);
+  return wait(p, exit_message_addr);
 }
 
 uint64
@@ -88,4 +93,55 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+// os as1 task2
+uint64
+sys_memsize(void)
+{
+  // from here we can call other function in the kernel from proc.c or trap.c and many others places
+    return myproc()->sz;
+}
+
+// os as1 task5
+uint64
+sys_set_ps_priority(void)
+{
+  int priority;
+  argint(0, &priority);
+  set_ps_priority(priority);
+  return 0;
+}
+
+// os as1 task6
+uint64
+sys_set_cfs_priority(void)
+{
+  int priority;
+  argint(0, &priority);
+  set_cfs_priority(priority);
+  return 0;
+}
+
+// os as1 task6
+uint64
+sys_get_cfs_stats(void)
+{
+  int procId;
+  uint64 addr;
+  argint(0, &procId);
+  argaddr(1, &addr);
+  get_cfs_stats(procId, addr);
+  return 0;
+}
+
+// os as1 task7
+uint64
+sys_set_policy(void)
+{
+  // from here we can call other function in the kernel from proc.c or trap.c and many others places
+  int policy;
+  argint(0, &policy);
+  set_policy(policy);
+  return 0;
 }
